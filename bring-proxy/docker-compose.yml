@@ -1,0 +1,16 @@
+services:
+  bring-proxy:
+    image: nginx:1.27-alpine
+    container_name: bring-proxy
+    restart: unless-stopped
+    # Put TLS in front of this (Traefik / Caddy / Cloudflare) at
+    # bring-proxy.apps.janjaap.de. Internally the proxy speaks plain HTTP.
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

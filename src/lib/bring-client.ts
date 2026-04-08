@@ -16,7 +16,22 @@
 
 import { uuidv4 } from './uuid';
 
-const BASE_URL = 'https://api.getbring.com/rest';
+/**
+ * Base URL of the Bring! API.
+ *
+ * We go through our own CORS-stripping reverse proxy because
+ * `api.getbring.com` does not return `Access-Control-Allow-Origin`
+ * headers, so a plain browser (including the WebView inside the Even
+ * Realities companion app) cannot talk to it directly.
+ *
+ * The proxy mirrors the upstream path structure one-to-one:
+ *   https://bring-proxy.apps.janjaap.de/<path>
+ *       → https://api.getbring.com/rest/<path>
+ *
+ * See `bring-proxy/` in this repo for the nginx config and Docker
+ * Compose definition.
+ */
+const BASE_URL = 'https://bring-proxy.apps.janjaap.de';
 
 /**
  * Hard-coded API key used by the Bring Android/Web clients. Same for
