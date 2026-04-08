@@ -20,17 +20,23 @@ cd bring-proxy
 docker compose up -d
 ```
 
-The proxy will be available on `http://localhost:8080`. Health check:
+The service only `expose`s port 80 on the Docker network — it is **not**
+bound to the host. Reach it from another container on the same network
+(e.g. `bring-proxy:80`) or through your TLS terminator.
+
+Health check from inside the container:
 
 ```bash
-curl http://localhost:8080/healthz
+docker compose exec bring-proxy wget -qO- http://localhost/healthz
 # ok
 ```
 
-Smoke-test against Bring!:
+Smoke-test against Bring! (run from a sibling container on the same
+network, or temporarily attach a throwaway one):
 
 ```bash
-curl -i -X POST http://localhost:8080/v2/bringauth \
+docker run --rm --network bring-proxy_default curlimages/curl:latest \
+  -i -X POST http://bring-proxy/v2/bringauth \
   -H 'X-BRING-API-KEY: cof4Nc6D8saplXjE3h3HXqHH8m7VU2i1Gs0g85Sp' \
   -H 'X-BRING-CLIENT: android' \
   -H 'X-BRING-APPLICATION: bring' \
@@ -46,8 +52,10 @@ You should see `Access-Control-Allow-Origin: *` on the response.
 
 Put your existing TLS terminator (Traefik, Caddy, Cloudflare Tunnel, ...)
 in front of the container and point `bring-proxy.apps.janjaap.de` at
-port `8080`. The proxy itself speaks plain HTTP — it's intentional so
-the terminator handles certificates.
+the `bring-proxy` container on port `80`. The proxy itself speaks plain
+HTTP — it's intentional so the terminator handles certificates. Because
+the service uses `expose` rather than `ports`, the terminator must share
+a Docker network with it.
 
 ### Example Traefik labels
 
