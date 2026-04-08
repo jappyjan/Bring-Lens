@@ -17,8 +17,13 @@ app) can talk to the Bring! API from a plain browser.
 
 ```bash
 cd bring-proxy
-docker compose up -d
+docker compose up -d --build
 ```
+
+The nginx config is baked into the image via `Dockerfile`, so there are
+no host bind mounts and the service is portable to any orchestrator
+(Coolify, plain docker compose, Kubernetes, ...) with zero host-side
+file staging.
 
 The service only `expose`s port 80 on the Docker network — it is **not**
 bound to the host. Reach it from another container on the same network
