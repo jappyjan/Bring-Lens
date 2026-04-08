@@ -1,0 +1,255 @@
+@import 'even-toolkit/web/theme-light.css';
+@import 'even-toolkit/web/typography.css';
+@import 'even-toolkit/web/utilities.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-display, system-ui, -apple-system, 'Segoe UI', sans-serif);
+  background: var(--color-bg, #eeeeee);
+  color: var(--color-text, #232323);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* App shell */
+.bl-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.bl-shell header.bl-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 20px;
+}
+
+.bl-brand {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.6px;
+}
+
+.bl-brand .bl-brand-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-positive, #4bb956);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.bl-nav a {
+  display: inline-block;
+  padding: 6px 10px;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--color-text-dim, #7b7b7b);
+}
+
+.bl-nav a.active {
+  color: var(--color-text, #232323);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Cards */
+.bl-card {
+  background: var(--color-surface, #ffffff);
+  border-radius: var(--radius-default, 6px);
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.bl-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.bl-card p {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--color-text-dim, #7b7b7b);
+}
+
+/* Forms */
+.bl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.bl-field label {
+  font-size: 13px;
+  color: var(--color-text-dim, #7b7b7b);
+}
+
+.bl-field input,
+.bl-field select {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-default, 6px);
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--color-text, #232323);
+  outline: none;
+}
+
+.bl-field input:focus,
+.bl-field select:focus {
+  border-color: var(--color-accent, #232323);
+}
+
+/* Buttons */
+.bl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent, #232323);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-default, 6px);
+  padding: 11px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.bl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bl-btn.ghost {
+  background: transparent;
+  color: var(--color-text, #232323);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.bl-btn.danger {
+  background: var(--color-negative, #ff453a);
+}
+
+.bl-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* Item rows */
+.bl-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.bl-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.bl-item:last-child {
+  border-bottom: none;
+}
+
+.bl-item .bl-item-name {
+  flex: 1;
+  font-size: 15px;
+}
+
+.bl-item .bl-item-spec {
+  font-size: 12px;
+  color: var(--color-text-dim, #7b7b7b);
+  margin-left: 6px;
+}
+
+.bl-item.recently .bl-item-name {
+  text-decoration: line-through;
+  color: var(--color-text-dim, #7b7b7b);
+}
+
+.bl-check {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  padding: 0;
+}
+
+.bl-check.on {
+  background: var(--color-positive, #4bb956);
+  border-color: var(--color-positive, #4bb956);
+}
+
+/* Status messages */
+.bl-error {
+  background: rgba(255, 69, 58, 0.1);
+  color: var(--color-negative, #ff453a);
+  padding: 10px 12px;
+  border-radius: var(--radius-default, 6px);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.bl-hint {
+  font-size: 12px;
+  color: var(--color-text-dim, #7b7b7b);
+  margin-top: 4px;
+}
+
+.bl-spin {
+  font-size: 13px;
+  color: var(--color-text-dim, #7b7b7b);
+}
+
+/* Add item form */
+.bl-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bl-add input {
+  flex: 1;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-default, 6px);
+  padding: 10px 12px;
+  font-size: 15px;
+  outline: none;
+}
