@@ -92,15 +92,15 @@ export function Home() {
         ) : null}
         <ul className="bl-items">
           {items.purchase.map((item) => (
-            <li key={item.uuid} className="bl-item">
+            <li key={item.name} className="bl-item">
               <button
                 type="button"
-                aria-label={`Check off ${item.itemId}`}
+                aria-label={`Check off ${item.name}`}
                 className="bl-check"
                 onClick={() => completeItem(item)}
               />
               <span className="bl-item-name">
-                {item.itemId}
+                {item.name}
                 {item.specification ? (
                   <span className="bl-item-spec">{item.specification}</span>
                 ) : null}
@@ -109,7 +109,7 @@ export function Home() {
                 type="button"
                 className="bl-btn ghost"
                 onClick={() => removeItem(item)}
-                aria-label={`Remove ${item.itemId}`}
+                aria-label={`Remove ${item.name}`}
               >
                 Remove
               </button>
@@ -123,17 +123,17 @@ export function Home() {
           <h2>Recently bought</h2>
           <ul className="bl-items">
             {items.recently.slice(0, 20).map((item) => (
-              <li key={item.uuid} className="bl-item recently">
+              <li key={item.name} className="bl-item recently">
                 <button
                   type="button"
-                  aria-label={`Add back ${item.itemId}`}
+                  aria-label={`Add back ${item.name}`}
                   className="bl-check on"
                   onClick={() => uncompleteItem(item)}
                 >
                   ✓
                 </button>
                 <span className="bl-item-name">
-                  {item.itemId}
+                  {item.name}
                   {item.specification ? (
                     <span className="bl-item-spec">{item.specification}</span>
                   ) : null}

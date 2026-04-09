@@ -167,13 +167,13 @@ export function BringGlasses() {
       setVoiceError('Did not catch that — try again.');
       return;
     }
-    const { itemId, spec } = parseVoiceInput(transcript);
-    if (!itemId) {
+    const { name, spec } = parseVoiceInput(transcript);
+    if (!name) {
       setVoiceError('No item recognised.');
       return;
     }
     try {
-      await addItem(itemId, spec);
+      await addItem(name, spec);
       setVoiceError(null);
     } catch (err) {
       setVoiceError(err instanceof Error ? err.message : 'Add failed.');

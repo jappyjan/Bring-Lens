@@ -1,66 +1,39 @@
 /**
- * Bring! Shopping List API client.
+ * Bring Lens client.
  *
- * Reverse-engineered from the community libraries miaucl/bring-api,
- * foxriver76/node-bring-api, and eliasball/python-bring-api. There is
- * no official public API, but the Android/Web clients all hit the
- * same base URL with the same hard-coded API key.
+ * Talks to the Bring Lens proxy (a small Express service that wraps
+ * the `bring-shopping` library) — see `bring-proxy/` in this repo.
+ * The proxy is the only thing that ever speaks to api.getbring.com;
+ * we keep the browser side small and CORS-friendly.
  *
- * Endpoints used:
- *   POST   /rest/v2/bringauth                    - login
- *   POST   /rest/v2/bringauth/token              - refresh access token
- *   GET    /rest/bringusers/{uuid}/lists         - list a user's lists
- *   GET    /rest/v2/bringlists/{listUuid}        - get items on a list
- *   PUT    /rest/v2/bringlists/{listUuid}/items  - batch add/complete/remove
+ * Architecture: stateless. The proxy can't reuse a session across
+ * requests because `bring-shopping` doesn't expose its bearer token,
+ * so the front-end stores `{email, password, country}` in the Even
+ * Realities SDK secure store and sends them with every call.
  */
 
-import { uuidv4 } from './uuid';
-
 /**
- * Base URL of the Bring! API.
+ * Base URL of the Bring Lens proxy.
  *
- * We go through our own CORS-stripping reverse proxy because
- * `api.getbring.com` does not return `Access-Control-Allow-Origin`
- * headers, so a plain browser (including the WebView inside the Even
- * Realities companion app) cannot talk to it directly.
- *
- * The proxy mirrors the upstream path structure one-to-one:
- *   https://bring-proxy.apps.janjaap.de/<path>
- *       → https://api.getbring.com/rest/<path>
- *
- * See `bring-proxy/` in this repo for the nginx config and Docker
- * Compose definition.
+ * The proxy exposes a small JSON API under `/api/*` and a `/healthz`
+ * endpoint for connectivity diagnostics.
  */
 export const BASE_URL = 'https://bring-proxy.apps.janjaap.de';
 
-/**
- * Hard-coded API key used by the Bring Android/Web clients. Same for
- * everyone and never rotates — confirmed across all community libraries.
- */
-const BRING_API_KEY = 'cof4Nc6D8saplXjE3h3HXqHH8m7VU2i1Gs0g85Sp';
-
-/** Headers that every request (authenticated or not) must carry. */
-function baseHeaders(country: string): Record<string, string> {
-  return {
-    'X-BRING-API-KEY': BRING_API_KEY,
-    'X-BRING-CLIENT': 'android',
-    'X-BRING-APPLICATION': 'bring',
-    'X-BRING-COUNTRY': country,
-  };
-}
-
 // ── Types ────────────────────────────────────────────────────────────
 
+/**
+ * The full credential bundle the front-end persists. Email + password
+ * are required for every authenticated proxy call; `name` is the
+ * friendly display name Bring returns from `login()`; `country` is on
+ * the wire for forward-compatibility (the proxy currently ignores it
+ * because `bring-shopping` hard-codes `X-BRING-COUNTRY: DE`).
+ */
 export interface BringAuth {
-  uuid: string;
-  publicUuid: string;
-  bringListUUID: string;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number; // epoch ms
   email: string;
-  name: string;
+  password: string;
   country: string;
+  name: string;
 }
 
 export interface BringList {
@@ -69,9 +42,14 @@ export interface BringList {
   theme: string;
 }
 
+/**
+ * An item on a Bring list. Note that on the to-buy / recently-bought
+ * sides Bring keys items by **name** — there is no per-item UUID, no
+ * `itemId`. Item names are localized canonical article keys (e.g.
+ * "Milch", "Apfel"), so they're stable identifiers within a list.
+ */
 export interface BringItem {
-  uuid: string;
-  itemId: string;
+  name: string;
   specification: string;
 }
 
@@ -80,42 +58,14 @@ export interface BringListItems {
   recently: BringItem[];
 }
 
-export type BringOperation = 'TO_PURCHASE' | 'TO_RECENTLY' | 'REMOVE';
-
-interface BringAuthResponse {
-  uuid: string;
-  publicUuid: string;
-  email: string;
-  name: string;
-  bringListUUID: string;
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-}
-
-interface BringListsResponse {
-  lists: BringList[];
-}
-
-interface BringItemsResponse {
-  uuid: string;
-  status: string;
-  items: {
-    purchase: BringItem[];
-    recently: BringItem[];
-  };
-}
-
 // ── Error helper ─────────────────────────────────────────────────────
 
 /**
  * Rich error type. For HTTP failures (`status` set) we keep both the
- * numeric status and the raw response body so callers can show the
- * upstream's own explanation. For network failures (`status` undefined)
- * we keep the underlying cause — typically `TypeError: Failed to fetch`
- * (Chrome) or `TypeError: Load failed` (Safari), which indicates DNS,
- * TLS, CORS-preflight, or a dead proxy.
+ * numeric status and the parsed proxy error body. For network failures
+ * (`status` undefined) we keep the underlying cause — typically
+ * `TypeError: Failed to fetch` (Chrome) or `TypeError: Load failed`
+ * (Safari), which indicates DNS, TLS, CORS-preflight, or a dead proxy.
  */
 export class BringApiError extends Error {
   constructor(
@@ -145,11 +95,16 @@ export class BringApiError extends Error {
   }
 }
 
+interface ProxyErrorBody {
+  error?: { message?: string; kind?: string };
+}
+
 /**
  * `fetch()` wrapper that turns every failure mode into a `BringApiError`
- * carrying the request URL. Distinguishes network errors (proxy / DNS /
- * CORS / TLS) from upstream HTTP errors so the UI can tell the user
- * which kind of problem they're looking at.
+ * carrying the request URL. Distinguishes network errors (DNS / TLS /
+ * CORS / dead proxy) from upstream HTTP errors so the UI can tell the
+ * user which kind of problem they're looking at, and unwraps the
+ * structured `{ error: { message } }` bodies the proxy returns.
  */
 async function safeFetch(
   label: string,
@@ -184,27 +139,49 @@ async function safeFetch(
 
   if (!res.ok) {
     let body = '';
+    let parsedMessage: string | undefined;
     try {
       body = await res.text();
+      if (body) {
+        try {
+          const parsed = JSON.parse(body) as ProxyErrorBody;
+          parsedMessage = parsed?.error?.message;
+        } catch {
+          // body wasn't JSON; surface the raw text
+        }
+      }
     } catch {
       // ignore
     }
-    throw new BringApiError(
-      `${label} failed: HTTP ${res.status} ${res.statusText}`,
-      res.status,
-      body,
-      url,
-    );
+    const detail = parsedMessage
+      ? `${label} failed: ${parsedMessage}`
+      : `${label} failed: HTTP ${res.status} ${res.statusText}`;
+    throw new BringApiError(detail, res.status, body, url);
   }
   return res;
 }
 
 /**
- * Hit the proxy's `/healthz` endpoint. This is a plain GET with **no**
- * custom headers, so it does not trigger a CORS preflight — a failure
- * here means the proxy is unreachable (DNS / TLS / container down),
- * whereas a success followed by a login failure narrows the problem
- * down to the preflight / upstream.
+ * POST a JSON body to the proxy and return the parsed JSON response.
+ * Centralises the (Content-Type, JSON.stringify, JSON.parse) dance
+ * so every endpoint stays a one-liner.
+ */
+async function postJson<T>(label: string, path: string, body: unknown): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  const res = await safeFetch(label, url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as T;
+}
+
+/**
+ * Hit the proxy's `/healthz` endpoint. Plain GET with **no** custom
+ * headers, so it does not trigger a CORS preflight — a failure here
+ * means the proxy is unreachable end-to-end (DNS / TLS / container
+ * down), whereas a successful ping followed by a failing login points
+ * at the proxy's upstream Bring connection or credentials.
  */
 export async function pingProxy(): Promise<{
   ok: boolean;
@@ -235,175 +212,77 @@ export async function pingProxy(): Promise<{
 // ── Auth ─────────────────────────────────────────────────────────────
 
 /**
- * Log in with email + password. Returns a full BringAuth record that
- * contains everything subsequent requests need.
+ * Validate credentials against the proxy's `/api/login` endpoint.
+ * Returns a fully-populated BringAuth that the caller should persist.
  */
 export async function login(
   email: string,
   password: string,
   country = 'DE',
 ): Promise<BringAuth> {
-  const form = new URLSearchParams();
-  form.set('email', email);
-  form.set('password', password);
-
-  const res = await safeFetch('Login', `${BASE_URL}/v2/bringauth`, {
-    method: 'POST',
-    headers: {
-      ...baseHeaders(country),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: form.toString(),
-  });
-  const data = (await res.json()) as BringAuthResponse;
-
-  return {
-    uuid: data.uuid,
-    publicUuid: data.publicUuid,
-    bringListUUID: data.bringListUUID,
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    email: data.email,
-    name: data.name,
+  const data = await postJson<{ name: string | null }>('Login', '/api/login', {
+    email,
+    password,
     country,
-  };
-}
-
-/**
- * Refresh an expired access token using the long-lived refresh token.
- */
-export async function refreshAccessToken(auth: BringAuth): Promise<BringAuth> {
-  const form = new URLSearchParams();
-  form.set('grant_type', 'refresh_token');
-  form.set('refresh_token', auth.refreshToken);
-
-  const res = await safeFetch('Token refresh', `${BASE_URL}/v2/bringauth/token`, {
-    method: 'POST',
-    headers: {
-      ...baseHeaders(auth.country),
-      Authorization: `Bearer ${auth.accessToken}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: form.toString(),
   });
-  const data = (await res.json()) as {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-  };
   return {
-    ...auth,
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  };
-}
-
-// ── Authenticated helper ─────────────────────────────────────────────
-
-function authHeaders(auth: BringAuth): Record<string, string> {
-  return {
-    ...baseHeaders(auth.country),
-    Authorization: `Bearer ${auth.accessToken}`,
-    'X-BRING-USER-UUID': auth.uuid,
-    'X-BRING-PUBLIC-USER-UUID': auth.publicUuid,
+    email,
+    password,
+    country,
+    name: data.name ?? '',
   };
 }
 
 // ── Lists ────────────────────────────────────────────────────────────
 
-/**
- * Load every list owned by / shared with the signed-in user.
- */
+/** Load every list owned by / shared with the signed-in user. */
 export async function getLists(auth: BringAuth): Promise<BringList[]> {
-  const res = await safeFetch(
-    'Get lists',
-    `${BASE_URL}/bringusers/${auth.uuid}/lists`,
-    { headers: authHeaders(auth) },
-  );
-  const data = (await res.json()) as BringListsResponse;
+  const data = await postJson<{ lists: BringList[] }>('Get lists', '/api/lists', {
+    email: auth.email,
+    password: auth.password,
+    country: auth.country,
+  });
   return data.lists ?? [];
 }
 
-/**
- * Load both "to buy" (purchase) and "recently bought" (recently) items
- * for a specific list.
- */
+/** Load both "to buy" and "recently bought" items for a list. */
 export async function getListItems(
   auth: BringAuth,
   listUuid: string,
 ): Promise<BringListItems> {
-  const res = await safeFetch(
+  const data = await postJson<BringListItems>(
     'Get list items',
-    `${BASE_URL}/v2/bringlists/${listUuid}`,
-    { headers: authHeaders(auth) },
+    '/api/lists/items',
+    {
+      email: auth.email,
+      password: auth.password,
+      country: auth.country,
+      listUuid,
+    },
   );
-  const data = (await res.json()) as BringItemsResponse;
   return {
-    purchase: data.items?.purchase ?? [],
-    recently: data.items?.recently ?? [],
+    purchase: data.purchase ?? [],
+    recently: data.recently ?? [],
   };
 }
 
 // ── Item mutations ───────────────────────────────────────────────────
 
-interface BringChange {
-  accuracy: string;
-  altitude: string;
-  latitude: string;
-  longitude: string;
-  itemId: string;
-  spec: string;
-  uuid: string;
-  operation: BringOperation;
-}
-
-function makeChange(
-  itemId: string,
-  operation: BringOperation,
-  spec = '',
-  uuid: string = uuidv4(),
-): BringChange {
-  return {
-    accuracy: '0.0',
-    altitude: '0.0',
-    latitude: '0.0',
-    longitude: '0.0',
-    itemId,
-    spec,
-    uuid,
-    operation,
-  };
-}
-
-/**
- * Send a batch of changes against a list. All community libraries use
- * the same v2 batch endpoint; a single request can contain many ops.
- */
-export async function batchUpdate(
-  auth: BringAuth,
-  listUuid: string,
-  changes: BringChange[],
-): Promise<void> {
-  await safeFetch('Batch update', `${BASE_URL}/v2/bringlists/${listUuid}/items`, {
-    method: 'PUT',
-    headers: {
-      ...authHeaders(auth),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ changes, sender: '' }),
-  });
-}
-
 /** Add an item to the "to buy" side of a list. */
 export async function addItem(
   auth: BringAuth,
   listUuid: string,
-  itemId: string,
+  name: string,
   spec = '',
 ): Promise<void> {
-  await batchUpdate(auth, listUuid, [makeChange(itemId, 'TO_PURCHASE', spec)]);
+  await postJson('Add item', '/api/lists/items/add', {
+    email: auth.email,
+    password: auth.password,
+    country: auth.country,
+    listUuid,
+    name,
+    spec,
+  });
 }
 
 /** Check off an item — moves it from "purchase" into "recently". */
@@ -412,20 +291,29 @@ export async function completeItem(
   listUuid: string,
   item: BringItem,
 ): Promise<void> {
-  await batchUpdate(auth, listUuid, [
-    makeChange(item.itemId, 'TO_RECENTLY', item.specification, item.uuid),
-  ]);
+  await postJson('Complete item', '/api/lists/items/complete', {
+    email: auth.email,
+    password: auth.password,
+    country: auth.country,
+    listUuid,
+    name: item.name,
+  });
 }
 
-/** Un-check an item — move "recently" back into "to buy". */
+/** Un-check an item — re-add it to the "to buy" side. */
 export async function uncompleteItem(
   auth: BringAuth,
   listUuid: string,
   item: BringItem,
 ): Promise<void> {
-  await batchUpdate(auth, listUuid, [
-    makeChange(item.itemId, 'TO_PURCHASE', item.specification, item.uuid),
-  ]);
+  await postJson('Uncomplete item', '/api/lists/items/uncomplete', {
+    email: auth.email,
+    password: auth.password,
+    country: auth.country,
+    listUuid,
+    name: item.name,
+    spec: item.specification,
+  });
 }
 
 /** Remove an item from a list entirely. */
@@ -434,29 +322,33 @@ export async function removeItem(
   listUuid: string,
   item: BringItem,
 ): Promise<void> {
-  await batchUpdate(auth, listUuid, [
-    makeChange(item.itemId, 'REMOVE', item.specification, item.uuid),
-  ]);
+  await postJson('Remove item', '/api/lists/items/remove', {
+    email: auth.email,
+    password: auth.password,
+    country: auth.country,
+    listUuid,
+    name: item.name,
+  });
 }
 
 // ── Natural-language helper for voice input ──────────────────────────
 
 /**
  * Turn free-form speech ("two liters of milk") into a canonical
- * (itemId, specification) pair. Bring's catalog keys on itemId, and
- * the user's locale decides what the canonical names look like.
+ * (name, spec) pair. Bring's catalog keys on item name, and the
+ * user's locale decides what the canonical names look like.
  *
  * We use a simple strategy: the first word becomes the specification
  * modifier only if it's a number / quantity token, otherwise the
- * whole phrase becomes the itemId. This mirrors how a user would
+ * whole phrase becomes the name. This mirrors how a user would
  * naturally type an item into Bring.
  */
-export function parseVoiceInput(raw: string): { itemId: string; spec: string } {
+export function parseVoiceInput(raw: string): { name: string; spec: string } {
   const cleaned = raw
     .trim()
     .replace(/[.,!?;:]+$/g, '')
     .replace(/\s+/g, ' ');
-  if (!cleaned) return { itemId: '', spec: '' };
+  if (!cleaned) return { name: '', spec: '' };
 
   const lower = cleaned.toLowerCase();
 
@@ -466,29 +358,29 @@ export function parseVoiceInput(raw: string): { itemId: string; spec: string } {
     '',
   );
 
-  // "X of Y" → spec=X, itemId=Y (e.g. "2 liters of milk")
+  // "X of Y" → spec=X, name=Y (e.g. "2 liters of milk")
   const ofMatch = stripped.match(/^(.+?)\s+of\s+(.+)$/);
   if (ofMatch) {
     const specPart = ofMatch[1]!.trim();
     const itemPart = ofMatch[2]!.trim();
     return {
-      itemId: capitalize(itemPart),
+      name: capitalize(itemPart),
       spec: specPart,
     };
   }
 
-  // Leading quantity: "2 bananas" → spec="2", itemId="bananas"
+  // Leading quantity: "2 bananas" → spec="2", name="bananas"
   const qtyMatch = stripped.match(
     /^(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)$/,
   );
   if (qtyMatch) {
     return {
-      itemId: capitalize(qtyMatch[2]!.trim()),
+      name: capitalize(qtyMatch[2]!.trim()),
       spec: qtyMatch[1]!.trim(),
     };
   }
 
-  return { itemId: capitalize(stripped), spec: '' };
+  return { name: capitalize(stripped), spec: '' };
 }
 
 function capitalize(s: string): string {

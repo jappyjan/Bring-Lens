@@ -1,7 +1,19 @@
-FROM nginx:1.27-alpine
+FROM node:22-alpine
 
-# Bake the proxy config into the image so the container has no host
-# bind-mount dependency. This makes the service portable to any
-# orchestrator (Coolify, plain docker compose, Kubernetes, ...)
-# without needing to pre-stage files on the host.
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
+
+# Install production dependencies first so the layer is cacheable
+# across server.js edits.
+COPY package.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+# Copy the actual application source.
+COPY server.js ./
+
+# Install wget so the docker-compose healthcheck (which lives in the
+# alpine base by default) can hit /healthz from inside the container.
+RUN apk add --no-cache wget
+
+EXPOSE 80
+
+CMD ["node", "server.js"]

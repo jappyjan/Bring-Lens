@@ -1,0 +1,18 @@
+{
+  "name": "bring-lens-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bring Lens proxy: a small Express service that wraps the bring-shopping library and exposes a CORS-friendly REST API for the Bring Lens browser front-end.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bring-shopping": "^2.0.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  }
+}

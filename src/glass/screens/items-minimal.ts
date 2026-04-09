@@ -22,8 +22,8 @@ export const itemsMinimalScreen: GlassScreen<BringSnapshot, BringActions> = {
     }
     const lines = items.map((item) => {
       const text = item.specification
-        ? `${item.itemId} · ${item.specification}`
-        : item.itemId;
+        ? `${item.name} · ${item.specification}`
+        : item.name;
       return line(truncate(text, 30), 'meta');
     });
     // If there's overflow, hint at how many more there are.

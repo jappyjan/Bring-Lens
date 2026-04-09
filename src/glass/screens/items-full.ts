@@ -41,11 +41,11 @@ function buildRows(snapshot: BringSnapshot): Row[] {
 }
 
 // Pad/truncate "name   spec" for a glasses row.
-function formatItemRow(itemId: string, spec: string, maxWidth = 44): string {
-  if (!spec) return truncate(itemId, maxWidth);
+function formatItemRow(name: string, spec: string, maxWidth = 44): string {
+  if (!spec) return truncate(name, maxWidth);
   const specPart = ` (${spec})`;
   const room = Math.max(6, maxWidth - specPart.length);
-  return `${truncate(itemId, room)}${specPart}`;
+  return `${truncate(name, room)}${specPart}`;
 }
 
 function formatRow(row: Row, snapshot: BringSnapshot): string {
@@ -60,7 +60,7 @@ function formatRow(row: Row, snapshot: BringSnapshot): string {
     case 'item': {
       const item = snapshot.purchase[row.index];
       if (!item) return '';
-      return formatItemRow(item.itemId, item.specification);
+      return formatItemRow(item.name, item.specification);
     }
     case 'toggle-view':
       return '↕ Minimal view';

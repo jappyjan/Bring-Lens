@@ -10,7 +10,6 @@ import {
 } from 'react';
 import {
   login as bringLogin,
-  refreshAccessToken,
   BringApiError,
   type BringAuth,
 } from '../lib/bring-client';
@@ -25,16 +24,15 @@ interface AuthContextValue {
   signIn(email: string, password: string, country?: string): Promise<void>;
   signOut(): Promise<void>;
   /**
-   * Lazily refresh the access token if we're within 5 minutes of expiry.
-   * Returns the current (possibly updated) auth record, or null if the
-   * user isn't signed in.
+   * Synchronous accessor for the current credential bundle. The proxy
+   * is stateless and there's no token to refresh, so this is just a
+   * thin wrapper around the React state ref. Returns null when the
+   * user is signed out.
    */
-  getFreshAuth(): Promise<BringAuth | null>;
+  getAuth(): BringAuth | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<BringAuth | null>(null);
@@ -43,13 +41,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const authRef = useRef<BringAuth | null>(null);
   authRef.current = auth;
 
-  // Restore persisted credentials on mount.
+  // Restore persisted credentials on mount. We treat anything that
+  // doesn't carry an `email`/`password` pair as stale (e.g. blobs
+  // from older versions that stored access/refresh tokens) and force
+  // a re-login.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const stored = await getJson<BringAuth>(StorageKeys.auth);
       if (cancelled) return;
-      if (stored && stored.uuid && stored.accessToken) {
+      if (stored && stored.email && stored.password) {
         setAuth(stored);
         setStatus('signed-in');
       } else {
@@ -101,29 +102,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await persist(null);
   }, [persist]);
 
-  const getFreshAuth = useCallback(async (): Promise<BringAuth | null> => {
-    const current = authRef.current;
-    if (!current) return null;
-    if (current.expiresAt - Date.now() > REFRESH_BUFFER_MS) return current;
-
-    try {
-      const refreshed = await refreshAccessToken(current);
-      authRef.current = refreshed;
-      setAuth(refreshed);
-      await persist(refreshed);
-      return refreshed;
-    } catch (err) {
-      console.warn('[bring-lens] token refresh failed; signing out.', err);
-      setAuth(null);
-      setStatus('signed-out');
-      await persist(null);
-      return null;
-    }
-  }, [persist]);
+  const getAuth = useCallback((): BringAuth | null => authRef.current, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, auth, error, signIn, signOut, getFreshAuth }),
-    [status, auth, error, signIn, signOut, getFreshAuth],
+    () => ({ status, auth, error, signIn, signOut, getAuth }),
+    [status, auth, error, signIn, signOut, getAuth],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

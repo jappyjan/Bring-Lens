@@ -56,7 +56,7 @@ const BringContext = createContext<BringContextValue | null>(null);
 const ITEMS_POLL_MS = 15_000; // 15 seconds while the app is open
 
 export function BringProvider({ children }: { children: ReactNode }) {
-  const { status, getFreshAuth } = useAuth();
+  const { status, getAuth } = useAuth();
   const { settings, loaded: settingsLoaded, updateSettings } = useSettings();
 
   const [lists, setLists] = useState<BringList[]>([]);
@@ -76,19 +76,18 @@ export function BringProvider({ children }: { children: ReactNode }) {
   // ── Loaders ──────────────────────────────────────────────────────
 
   const refreshLists = useCallback(async () => {
-    const auth = await getFreshAuth();
+    const auth = getAuth();
     if (!auth) return;
     setListsLoading(true);
     setListsError(null);
     try {
       const next = await getLists(auth);
       setLists(next);
-      // If no active list is chosen yet, pick the saved default or the
-      // user's primary list (bringListUUID) or the first one.
+      // If no active list is chosen yet, prefer the saved default,
+      // otherwise fall back to the first list in the response.
       if (!activeListRef.current) {
         const chosen =
           next.find((l) => l.listUuid === settings.defaultListUuid)?.listUuid ??
-          next.find((l) => l.listUuid === auth.bringListUUID)?.listUuid ??
           next[0]?.listUuid ??
           null;
         if (chosen) {
@@ -101,7 +100,7 @@ export function BringProvider({ children }: { children: ReactNode }) {
     } finally {
       setListsLoading(false);
     }
-  }, [getFreshAuth, settings.defaultListUuid]);
+  }, [getAuth, settings.defaultListUuid]);
 
   const refreshItems = useCallback(async () => {
     const listUuid = activeListRef.current;
@@ -109,7 +108,7 @@ export function BringProvider({ children }: { children: ReactNode }) {
       setItems(EMPTY_ITEMS);
       return;
     }
-    const auth = await getFreshAuth();
+    const auth = getAuth();
     if (!auth) return;
     setItemsLoading(true);
     setItemsError(null);
@@ -125,7 +124,7 @@ export function BringProvider({ children }: { children: ReactNode }) {
     } finally {
       setItemsLoading(false);
     }
-  }, [getFreshAuth]);
+  }, [getAuth]);
 
   // Refresh lists as soon as we're signed in and settings are loaded.
   useEffect(() => {
@@ -165,15 +164,15 @@ export function BringProvider({ children }: { children: ReactNode }) {
 
   // ── Mutations (optimistic) ───────────────────────────────────────
 
-  // Thin wrapper: refresh the access token (if needed) and hand a
-  // non-null auth record to the API caller, or throw.
+  // Thin wrapper: hand a non-null auth record to the API caller, or
+  // throw. The proxy is stateless so there's nothing to refresh.
   const withAuth = useCallback(
-    async <T,>(fn: (auth: NonNullable<Awaited<ReturnType<typeof getFreshAuth>>>) => Promise<T>) => {
-      const auth = await getFreshAuth();
+    async <T,>(fn: (auth: NonNullable<ReturnType<typeof getAuth>>) => Promise<T>) => {
+      const auth = getAuth();
       if (!auth) throw new Error('Not signed in');
       return fn(auth);
     },
-    [getFreshAuth],
+    [getAuth],
   );
 
   const doAddItem = useCallback(
@@ -182,14 +181,16 @@ export function BringProvider({ children }: { children: ReactNode }) {
       if (!listUuid) throw new Error('No active list');
       const trimmed = name.trim();
       if (!trimmed) return;
-      // Optimistic: put a pending item at the top of the purchase list.
-      const optimistic: BringItem = {
-        uuid: `pending-${Date.now()}`,
-        itemId: trimmed,
-        specification: spec,
-      };
+      // Optimistic: put the new item at the top of the purchase list.
+      // Items are keyed by name on the to-buy side, so duplicate names
+      // would conflict — drop any existing entry with the same name
+      // before splicing the optimistic copy in.
+      const optimistic: BringItem = { name: trimmed, specification: spec };
       setItems((prev) => ({
-        purchase: [optimistic, ...prev.purchase],
+        purchase: [
+          optimistic,
+          ...prev.purchase.filter((i) => i.name !== trimmed),
+        ],
         recently: prev.recently,
       }));
       try {
@@ -198,7 +199,7 @@ export function BringProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         // Roll back the optimistic add on failure.
         setItems((prev) => ({
-          purchase: prev.purchase.filter((i) => i.uuid !== optimistic.uuid),
+          purchase: prev.purchase.filter((i) => i.name !== trimmed),
           recently: prev.recently,
         }));
         throw err;
@@ -212,8 +213,8 @@ export function BringProvider({ children }: { children: ReactNode }) {
       const listUuid = activeListRef.current;
       if (!listUuid) return;
       setItems((prev) => ({
-        purchase: prev.purchase.filter((i) => i.uuid !== item.uuid),
-        recently: [item, ...prev.recently],
+        purchase: prev.purchase.filter((i) => i.name !== item.name),
+        recently: [item, ...prev.recently.filter((i) => i.name !== item.name)],
       }));
       try {
         await withAuth((auth) => apiCompleteItem(auth, listUuid, item));
@@ -230,8 +231,8 @@ export function BringProvider({ children }: { children: ReactNode }) {
       const listUuid = activeListRef.current;
       if (!listUuid) return;
       setItems((prev) => ({
-        purchase: [item, ...prev.purchase],
-        recently: prev.recently.filter((i) => i.uuid !== item.uuid),
+        purchase: [item, ...prev.purchase.filter((i) => i.name !== item.name)],
+        recently: prev.recently.filter((i) => i.name !== item.name),
       }));
       try {
         await withAuth((auth) => apiUncompleteItem(auth, listUuid, item));
@@ -248,8 +249,8 @@ export function BringProvider({ children }: { children: ReactNode }) {
       const listUuid = activeListRef.current;
       if (!listUuid) return;
       setItems((prev) => ({
-        purchase: prev.purchase.filter((i) => i.uuid !== item.uuid),
-        recently: prev.recently.filter((i) => i.uuid !== item.uuid),
+        purchase: prev.purchase.filter((i) => i.name !== item.name),
+        recently: prev.recently.filter((i) => i.name !== item.name),
       }));
       try {
         await withAuth((auth) => apiRemoveItem(auth, listUuid, item));

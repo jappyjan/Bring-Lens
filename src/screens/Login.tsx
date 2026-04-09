@@ -6,10 +6,11 @@ import { BASE_URL, pingProxy } from '../lib/bring-client';
 type PingResult = Awaited<ReturnType<typeof pingProxy>>;
 
 /**
- * Login form for the Bring! account. Credentials are handed directly
- * to the Bring! auth endpoint; the resulting access/refresh tokens are
- * persisted via the Even Realities SDK's local storage (see
- * `src/lib/storage.ts`).
+ * Login form for the Bring! account. Credentials are validated through
+ * the Bring Lens proxy and then persisted to the Even Realities SDK
+ * local storage (see `src/lib/storage.ts`). The proxy is stateless,
+ * so the email + password are kept on the device and forwarded with
+ * every subsequent API call.
  */
 export function Login() {
   const { status, signIn, error } = useAuth();
@@ -51,8 +52,10 @@ export function Login() {
       <h2>Sign in to Bring!</h2>
       <p>
         Your Bring! account connects this app to your shopping lists. Your
-        credentials are stored securely on your glasses via the Even
-        Realities SDK and are never sent anywhere except to Bring!.
+        credentials are stored on the Even Realities SDK secure store and
+        are forwarded to the Bring Lens proxy, which talks to Bring on
+        your behalf using the community <code>bring-shopping</code>{' '}
+        library.
       </p>
 
       {error ? (
@@ -122,7 +125,9 @@ export function Login() {
         "Failed to fetch"), use this button to test the proxy directly.
         It hits <code>{BASE_URL}/healthz</code> with no custom headers,
         so it bypasses the CORS preflight and tells you whether the
-        proxy is reachable at all.
+        proxy itself is reachable. A successful ping plus a failing
+        sign-in narrows the problem to either bad credentials or the
+        proxy's connection to Bring.
       </p>
       <div className="bl-actions">
         <button
