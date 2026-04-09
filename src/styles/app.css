@@ -226,6 +226,25 @@ button {
   margin-bottom: 12px;
 }
 
+.bl-error strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.bl-error-detail {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--color-text, #232323);
+  padding: 10px 12px;
+  border-radius: var(--radius-default, 6px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  margin: 0;
+}
+
 .bl-hint {
   font-size: 12px;
   color: var(--color-text-dim, #7b7b7b);

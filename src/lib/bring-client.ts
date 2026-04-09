@@ -31,7 +31,7 @@ import { uuidv4 } from './uuid';
  * See `bring-proxy/` in this repo for the nginx config and Docker
  * Compose definition.
  */
-const BASE_URL = 'https://bring-proxy.apps.janjaap.de';
+export const BASE_URL = 'https://bring-proxy.apps.janjaap.de';
 
 /**
  * Hard-coded API key used by the Bring Android/Web clients. Same for
@@ -109,30 +109,127 @@ interface BringItemsResponse {
 
 // ── Error helper ─────────────────────────────────────────────────────
 
+/**
+ * Rich error type. For HTTP failures (`status` set) we keep both the
+ * numeric status and the raw response body so callers can show the
+ * upstream's own explanation. For network failures (`status` undefined)
+ * we keep the underlying cause — typically `TypeError: Failed to fetch`
+ * (Chrome) or `TypeError: Load failed` (Safari), which indicates DNS,
+ * TLS, CORS-preflight, or a dead proxy.
+ */
 export class BringApiError extends Error {
   constructor(
     message: string,
     public readonly status?: number,
     public readonly body?: string,
+    public readonly url?: string,
+    public readonly cause?: unknown,
   ) {
     super(message);
     this.name = 'BringApiError';
   }
+
+  /** Human-readable multi-line description for the UI / logs. */
+  toDetail(): string {
+    const lines: string[] = [this.message];
+    if (this.url) lines.push(`URL: ${this.url}`);
+    if (this.status !== undefined) lines.push(`Status: ${this.status}`);
+    if (this.body) {
+      const snippet = this.body.length > 500 ? `${this.body.slice(0, 500)}…` : this.body;
+      lines.push(`Body: ${snippet}`);
+    }
+    if (this.cause instanceof Error && this.cause.message) {
+      lines.push(`Cause: ${this.cause.name}: ${this.cause.message}`);
+    }
+    return lines.join('\n');
+  }
 }
 
-async function throwIfNotOk(res: Response, label: string): Promise<void> {
-  if (res.ok) return;
-  let body = '';
+/**
+ * `fetch()` wrapper that turns every failure mode into a `BringApiError`
+ * carrying the request URL. Distinguishes network errors (proxy / DNS /
+ * CORS / TLS) from upstream HTTP errors so the UI can tell the user
+ * which kind of problem they're looking at.
+ */
+async function safeFetch(
+  label: string,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  let res: Response;
   try {
-    body = await res.text();
-  } catch {
-    // ignore
+    res = await fetch(url, init);
+  } catch (err) {
+    // `fetch` only rejects on genuine network-level failures — the
+    // request never produced a response. The browser's devtools will
+    // have the real reason (CORS, DNS, TLS, ...) in the console; here
+    // we reconstruct the best message we can for the in-app UI.
+    const base = err instanceof Error ? err.message : String(err);
+    const looksLikeNetwork =
+      err instanceof TypeError ||
+      /load failed|failed to fetch|networkerror/i.test(base);
+    const hint = looksLikeNetwork
+      ? ' (network error — the browser could not reach the proxy. ' +
+        'Check that the proxy is running, its TLS certificate is valid, ' +
+        'and that CORS preflight succeeds.)'
+      : '';
+    throw new BringApiError(
+      `${label} failed before reaching the server: ${base}${hint}`,
+      undefined,
+      undefined,
+      url,
+      err,
+    );
   }
-  throw new BringApiError(
-    `${label} failed: ${res.status} ${res.statusText}`,
-    res.status,
-    body,
-  );
+
+  if (!res.ok) {
+    let body = '';
+    try {
+      body = await res.text();
+    } catch {
+      // ignore
+    }
+    throw new BringApiError(
+      `${label} failed: HTTP ${res.status} ${res.statusText}`,
+      res.status,
+      body,
+      url,
+    );
+  }
+  return res;
+}
+
+/**
+ * Hit the proxy's `/healthz` endpoint. This is a plain GET with **no**
+ * custom headers, so it does not trigger a CORS preflight — a failure
+ * here means the proxy is unreachable (DNS / TLS / container down),
+ * whereas a success followed by a login failure narrows the problem
+ * down to the preflight / upstream.
+ */
+export async function pingProxy(): Promise<{
+  ok: boolean;
+  status?: number;
+  body?: string;
+  error?: string;
+  url: string;
+}> {
+  const url = `${BASE_URL}/healthz`;
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    let body = '';
+    try {
+      body = (await res.text()).trim();
+    } catch {
+      // ignore
+    }
+    return { ok: res.ok, status: res.status, body, url };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      url,
+    };
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────
@@ -150,7 +247,7 @@ export async function login(
   form.set('email', email);
   form.set('password', password);
 
-  const res = await fetch(`${BASE_URL}/v2/bringauth`, {
+  const res = await safeFetch('Login', `${BASE_URL}/v2/bringauth`, {
     method: 'POST',
     headers: {
       ...baseHeaders(country),
@@ -158,7 +255,6 @@ export async function login(
     },
     body: form.toString(),
   });
-  await throwIfNotOk(res, 'Login');
   const data = (await res.json()) as BringAuthResponse;
 
   return {
@@ -182,7 +278,7 @@ export async function refreshAccessToken(auth: BringAuth): Promise<BringAuth> {
   form.set('grant_type', 'refresh_token');
   form.set('refresh_token', auth.refreshToken);
 
-  const res = await fetch(`${BASE_URL}/v2/bringauth/token`, {
+  const res = await safeFetch('Token refresh', `${BASE_URL}/v2/bringauth/token`, {
     method: 'POST',
     headers: {
       ...baseHeaders(auth.country),
@@ -191,7 +287,6 @@ export async function refreshAccessToken(auth: BringAuth): Promise<BringAuth> {
     },
     body: form.toString(),
   });
-  await throwIfNotOk(res, 'Token refresh');
   const data = (await res.json()) as {
     access_token: string;
     refresh_token: string;
@@ -222,10 +317,11 @@ function authHeaders(auth: BringAuth): Record<string, string> {
  * Load every list owned by / shared with the signed-in user.
  */
 export async function getLists(auth: BringAuth): Promise<BringList[]> {
-  const res = await fetch(`${BASE_URL}/bringusers/${auth.uuid}/lists`, {
-    headers: authHeaders(auth),
-  });
-  await throwIfNotOk(res, 'Get lists');
+  const res = await safeFetch(
+    'Get lists',
+    `${BASE_URL}/bringusers/${auth.uuid}/lists`,
+    { headers: authHeaders(auth) },
+  );
   const data = (await res.json()) as BringListsResponse;
   return data.lists ?? [];
 }
@@ -238,10 +334,11 @@ export async function getListItems(
   auth: BringAuth,
   listUuid: string,
 ): Promise<BringListItems> {
-  const res = await fetch(`${BASE_URL}/v2/bringlists/${listUuid}`, {
-    headers: authHeaders(auth),
-  });
-  await throwIfNotOk(res, 'Get list items');
+  const res = await safeFetch(
+    'Get list items',
+    `${BASE_URL}/v2/bringlists/${listUuid}`,
+    { headers: authHeaders(auth) },
+  );
   const data = (await res.json()) as BringItemsResponse;
   return {
     purchase: data.items?.purchase ?? [],
@@ -289,7 +386,7 @@ export async function batchUpdate(
   listUuid: string,
   changes: BringChange[],
 ): Promise<void> {
-  const res = await fetch(`${BASE_URL}/v2/bringlists/${listUuid}/items`, {
+  await safeFetch('Batch update', `${BASE_URL}/v2/bringlists/${listUuid}/items`, {
     method: 'PUT',
     headers: {
       ...authHeaders(auth),
@@ -297,7 +394,6 @@ export async function batchUpdate(
     },
     body: JSON.stringify({ changes, sender: '' }),
   });
-  await throwIfNotOk(res, 'Batch update');
 }
 
 /** Add an item to the "to buy" side of a list. */

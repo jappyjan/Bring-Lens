@@ -11,6 +11,7 @@ import {
 import {
   login as bringLogin,
   refreshAccessToken,
+  BringApiError,
   type BringAuth,
 } from '../lib/bring-client';
 import { getJson, removeItem, setJson, StorageKeys } from '../lib/storage';
@@ -77,7 +78,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus('signed-in');
         await persist(next);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        // Prefer the rich multi-line detail from BringApiError so the
+        // Login screen can show URL / status / body / underlying cause
+        // instead of a bare "Load failed" string.
+        const message =
+          err instanceof BringApiError
+            ? err.toDetail()
+            : err instanceof Error
+              ? err.message
+              : String(err);
         setError(message);
         throw err;
       }
