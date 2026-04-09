@@ -7,7 +7,7 @@ import type { BringActions, BringSnapshot } from '../shared';
 import { activeListName } from '../shared';
 
 /**
- * FULL view — this is what you use at home while prepping to shop.
+ * The full glasses list view.
  *
  * Layout:
  *   ── Header ────────────────
@@ -17,25 +17,22 @@ import { activeListName } from '../shared';
  *    Milch (1L)                ← indices continue with purchase items
  *    Brot
  *    …
- *    ↕ Switch to minimal       ← bottom utility row
  *    → Change list             ← bottom utility row
  *
  * Tapping a purchase item checks it off (TO_RECENTLY). Tapping the
- * voice row starts a recording. Tapping a utility row navigates.
+ * voice row starts a recording. Tapping "Change list" navigates.
  */
 
 // Row kinds the full view can contain.
 type Row =
   | { kind: 'voice' }
   | { kind: 'item'; index: number }
-  | { kind: 'toggle-view' }
   | { kind: 'change-list' };
 
 function buildRows(snapshot: BringSnapshot): Row[] {
   const rows: Row[] = [];
   if (snapshot.canVoice) rows.push({ kind: 'voice' });
   snapshot.purchase.forEach((_, i) => rows.push({ kind: 'item', index: i }));
-  rows.push({ kind: 'toggle-view' });
   rows.push({ kind: 'change-list' });
   return rows;
 }
@@ -62,8 +59,6 @@ function formatRow(row: Row, snapshot: BringSnapshot): string {
       if (!item) return '';
       return formatItemRow(item.name, item.specification);
     }
-    case 'toggle-view':
-      return '↕ Minimal view';
     case 'change-list':
       return '→ Change list';
   }
@@ -154,9 +149,6 @@ export const itemsFullScreen: GlassScreen<BringSnapshot, BringActions> = {
             ),
           };
         }
-        case 'toggle-view':
-          ctx.toggleViewMode();
-          return nav;
         case 'change-list':
           ctx.navigate('/glasses/lists');
           return nav;

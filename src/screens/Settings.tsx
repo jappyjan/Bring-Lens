@@ -2,10 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useBring } from '../contexts/BringContext';
-import {
-  useSettings,
-  type GlassesViewMode,
-} from '../contexts/SettingsContext';
+import { useSettings } from '../contexts/SettingsContext';
 
 /**
  * Phone-side settings: pick the default list, default glasses view,
@@ -74,31 +71,6 @@ export function Settings() {
           >
             Reload lists
           </button>
-        </div>
-      </div>
-
-      <div className="bl-card">
-        <h2>Glasses view</h2>
-        <p>
-          Pick how the list appears on your glasses. You can also switch
-          views live from the glasses menu.
-        </p>
-        <div className="bl-field">
-          <label htmlFor="view-mode">Default view</label>
-          <select
-            id="view-mode"
-            value={settings.defaultView}
-            onChange={(e) =>
-              void updateSettings({
-                defaultView: e.target.value as GlassesViewMode,
-              })
-            }
-          >
-            <option value="full">Full — header + scrollable list (for prep)</option>
-            <option value="minimal">
-              Minimal — tiny hint in the corner (for in-store)
-            </option>
-          </select>
         </div>
       </div>
 

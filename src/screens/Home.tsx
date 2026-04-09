@@ -26,6 +26,10 @@ export function Home() {
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // Inline two-tap confirmation for item removal. Stores the `name` of
+  // the item whose Remove button has been armed; any other interaction
+  // (complete, add, list change, remove on a different item) cancels.
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
 
   if (status === 'loading') return <div className="bl-spin">Loading…</div>;
   if (status === 'signed-out') return <Navigate to="/login" replace />;
@@ -34,12 +38,29 @@ export function Home() {
     e.preventDefault();
     if (!draft.trim()) return;
     setBusy(true);
+    setPendingRemove(null);
     try {
       await addItem(draft);
       setDraft('');
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleRemoveClick(itemName: string) {
+    if (pendingRemove === itemName) {
+      const item = items.purchase.find((i) => i.name === itemName);
+      if (item) void removeItem(item);
+      setPendingRemove(null);
+    } else {
+      setPendingRemove(itemName);
+    }
+  }
+
+  function handleComplete(itemName: string) {
+    setPendingRemove(null);
+    const item = items.purchase.find((i) => i.name === itemName);
+    if (item) void completeItem(item);
   }
 
   return (
@@ -51,7 +72,10 @@ export function Home() {
           <select
             id="list-select"
             value={activeListUuid ?? ''}
-            onChange={(e) => setActiveListUuid(e.target.value || null)}
+            onChange={(e) => {
+              setPendingRemove(null);
+              setActiveListUuid(e.target.value || null);
+            }}
           >
             {lists.length === 0 ? <option value="">No lists found</option> : null}
             {lists.map((list) => (
@@ -87,34 +111,41 @@ export function Home() {
 
       <div className="bl-card">
         <h2>To buy ({items.purchase.length})</h2>
-        {items.purchase.length === 0 && !itemsLoading ? (
+        {items.purchase.length === 0 ? (
           <p>Your list is empty. Add an item above, or say something on the glasses.</p>
         ) : null}
         <ul className="bl-items">
-          {items.purchase.map((item) => (
-            <li key={item.name} className="bl-item">
-              <button
-                type="button"
-                aria-label={`Check off ${item.name}`}
-                className="bl-check"
-                onClick={() => completeItem(item)}
-              />
-              <span className="bl-item-name">
-                {item.name}
-                {item.specification ? (
-                  <span className="bl-item-spec">{item.specification}</span>
-                ) : null}
-              </span>
-              <button
-                type="button"
-                className="bl-btn ghost"
-                onClick={() => removeItem(item)}
-                aria-label={`Remove ${item.name}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+          {items.purchase.map((item) => {
+            const isPending = pendingRemove === item.name;
+            return (
+              <li key={item.name} className="bl-item">
+                <button
+                  type="button"
+                  aria-label={`Check off ${item.name}`}
+                  className="bl-check"
+                  onClick={() => handleComplete(item.name)}
+                />
+                <span className="bl-item-name">
+                  {item.name}
+                  {item.specification ? (
+                    <span className="bl-item-spec">{item.specification}</span>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className={isPending ? 'bl-btn danger' : 'bl-btn ghost'}
+                  onClick={() => handleRemoveClick(item.name)}
+                  aria-label={
+                    isPending
+                      ? `Confirm remove ${item.name}`
+                      : `Remove ${item.name}`
+                  }
+                >
+                  {isPending ? 'Confirm remove?' : 'Remove'}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
