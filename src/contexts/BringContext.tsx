@@ -29,6 +29,15 @@ import { useSettings } from './SettingsContext';
  * the list) does on the phone.
  */
 
+interface RefreshItemsOptions {
+  /**
+   * When true, don't toggle `itemsLoading` during the fetch. Used by the
+   * background polling loop so the phone empty-state copy and the glass
+   * header's "…" busy hint don't blink every tick.
+   */
+  silent?: boolean;
+}
+
 interface BringContextValue {
   lists: BringList[];
   listsLoading: boolean;
@@ -41,7 +50,7 @@ interface BringContextValue {
   items: BringListItems;
   itemsLoading: boolean;
   itemsError: string | null;
-  refreshItems(): Promise<void>;
+  refreshItems(options?: RefreshItemsOptions): Promise<void>;
 
   addItem(name: string, spec?: string): Promise<void>;
   completeItem(item: BringItem): Promise<void>;
@@ -102,29 +111,33 @@ export function BringProvider({ children }: { children: ReactNode }) {
     }
   }, [getAuth, settings.defaultListUuid]);
 
-  const refreshItems = useCallback(async () => {
-    const listUuid = activeListRef.current;
-    if (!listUuid) {
-      setItems(EMPTY_ITEMS);
-      return;
-    }
-    const auth = getAuth();
-    if (!auth) return;
-    setItemsLoading(true);
-    setItemsError(null);
-    try {
-      const next = await getListItems(auth, listUuid);
-      // Only apply the result if the active list hasn't changed while
-      // the request was in flight. Prevents stale items flashing in.
-      if (activeListRef.current === listUuid) {
-        setItems(next);
+  const refreshItems = useCallback(
+    async (options?: RefreshItemsOptions) => {
+      const silent = options?.silent ?? false;
+      const listUuid = activeListRef.current;
+      if (!listUuid) {
+        setItems(EMPTY_ITEMS);
+        return;
       }
-    } catch (err) {
-      setItemsError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setItemsLoading(false);
-    }
-  }, [getAuth]);
+      const auth = getAuth();
+      if (!auth) return;
+      if (!silent) setItemsLoading(true);
+      setItemsError(null);
+      try {
+        const next = await getListItems(auth, listUuid);
+        // Only apply the result if the active list hasn't changed while
+        // the request was in flight. Prevents stale items flashing in.
+        if (activeListRef.current === listUuid) {
+          setItems(next);
+        }
+      } catch (err) {
+        setItemsError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!silent) setItemsLoading(false);
+      }
+    },
+    [getAuth],
+  );
 
   // Refresh lists as soon as we're signed in and settings are loaded.
   useEffect(() => {
@@ -139,12 +152,14 @@ export function BringProvider({ children }: { children: ReactNode }) {
   }, [status, settingsLoaded, refreshLists]);
 
   // When the active list changes (or on initial load), fetch its items
-  // and start polling.
+  // and start polling. The initial fetch is non-silent (drives the first
+  // spinner), but the background poll is silent so it doesn't flash the
+  // phone empty-state or the glass header's busy hint.
   useEffect(() => {
     if (!activeListUuid || status !== 'signed-in') return;
     void refreshItems();
     const id = window.setInterval(() => {
-      void refreshItems();
+      void refreshItems({ silent: true });
     }, ITEMS_POLL_MS);
     return () => window.clearInterval(id);
   }, [activeListUuid, status, refreshItems]);

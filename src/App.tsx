@@ -21,6 +21,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Gates the glasses bridge on a resolved auth status, and remounts it on
+ * every status transition. `useGlasses` only re-runs `deriveScreen` on
+ * pathname changes — remounting via `key={status}` is how we make sure
+ * the glasses flip from the signed-out screen to the items view (and
+ * back) without needing the user to navigate.
+ */
+function GlassesRoot() {
+  const { status } = useAuth();
+  if (status === 'loading') return null;
+  return <BringGlasses key={status} />;
+}
+
 export function App() {
   return (
     <SettingsProvider>
@@ -28,7 +41,7 @@ export function App() {
         <BringProvider>
           <BrowserRouter>
             {/* Headless component that drives the glasses display. */}
-            <BringGlasses />
+            <GlassesRoot />
             <Routes>
               <Route element={<Shell />}>
                 <Route

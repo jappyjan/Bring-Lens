@@ -9,13 +9,9 @@ import {
 } from 'react';
 import { getJson, setJson, StorageKeys } from '../lib/storage';
 
-export type GlassesViewMode = 'full' | 'minimal';
-
 export interface AppSettings {
   /** The list that is shown on the glasses by default on app start. */
   defaultListUuid: string | null;
-  /** Which layout the glasses boot into. */
-  defaultView: GlassesViewMode;
   /** Soniox STT API key for voice-add. Optional. */
   sonioxApiKey: string | null;
   /** Locale used for item names. Drives Bring!'s `X-BRING-COUNTRY` header. */
@@ -26,7 +22,6 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   defaultListUuid: null,
-  defaultView: 'full',
   sonioxApiKey: null,
   country: 'DE',
   sttLanguage: 'en-US',
