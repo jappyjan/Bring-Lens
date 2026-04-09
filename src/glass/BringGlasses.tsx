@@ -7,7 +7,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBring } from '../contexts/BringContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { parseVoiceInput } from '../lib/bring-client';
-import { bringSplash } from './splash';
 import { onGlassAction, toDisplayData } from './selectors';
 import type { BringActions, BringSnapshot } from './shared';
 
@@ -104,22 +103,32 @@ export function BringGlasses() {
 
   // ── Screen derivation ─────────────────────────────────────────────
   //
-  // When signed out, pin the display to the signed-out screen. When
-  // signed in, derive from the URL, and when derived to the items
-  // view, fall through to the user's preferred variant (full/minimal).
-  const deriveScreen = useCallback(
-    (path: string): string => {
-      if (status !== 'signed-in') return 'signed-out';
-      const raw = deriveScreenForAuthed(path);
-      if (raw === 'items-full') {
-        return settings.defaultView === 'minimal'
-          ? 'items-minimal'
-          : 'items-full';
-      }
-      return raw;
-    },
-    [status, settings.defaultView],
-  );
+  // `useGlasses` captures its config callbacks on mount and then polls
+  // them on a 100 ms interval, so a dep-driven `useCallback` would be
+  // stale forever. Keep a single stable `deriveScreen` function that
+  // reads auth status + view-mode preference from refs. This fixes two
+  // issues at once:
+  //
+  //   1. After a browser reload with saved credentials, AuthContext
+  //      briefly reports `status: 'loading'` before flipping to
+  //      'signed-in'. Without refs, the glasses were pinned to the
+  //      signed-out screen for the rest of the session.
+  //   2. Tapping "Minimal view" updates `settings.defaultView`, but the
+  //      old closure never saw the change, so you couldn't get back to
+  //      the full view from the glasses.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const viewModeRef = useRef(settings.defaultView);
+  viewModeRef.current = settings.defaultView;
+
+  const deriveScreen = useCallback((path: string): string => {
+    if (statusRef.current !== 'signed-in') return 'signed-out';
+    const raw = deriveScreenForAuthed(path);
+    if (raw === 'items-full') {
+      return viewModeRef.current === 'minimal' ? 'items-minimal' : 'items-full';
+    }
+    return raw;
+  }, []);
 
   // ── Actions (glass screens call these via `ctx`) ─────────────────
 
@@ -127,11 +136,14 @@ export function BringGlasses() {
   // have to rebuild the `useGlasses` config on every change.
   const actionsRef = useRef<BringActions>(null as unknown as BringActions);
 
+  // Read the current view mode from the ref so the action handler is
+  // stable and always flips based on the latest state, not whatever
+  // was current when the callback was first created.
   const toggleViewMode = useCallback(() => {
     void updateSettings({
-      defaultView: settings.defaultView === 'minimal' ? 'full' : 'minimal',
+      defaultView: viewModeRef.current === 'minimal' ? 'full' : 'minimal',
     });
-  }, [settings.defaultView, updateSettings]);
+  }, [updateSettings]);
 
   const startVoice = useCallback(() => {
     if (!settings.sonioxApiKey) {
@@ -223,7 +235,6 @@ export function BringGlasses() {
     onGlassAction: handleGlassAction,
     deriveScreen,
     appName: 'BRING LENS',
-    splash: bringSplash,
     getPageMode,
     shutdownOnHomeBack: true,
   });
