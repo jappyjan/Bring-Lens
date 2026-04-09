@@ -9,3 +9,5 @@ dist-ssr
 .idea
 .vscode
 *.log
+package-lock.json
+*.tsbuildinfo
