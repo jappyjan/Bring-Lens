@@ -11,3 +11,4 @@ dist-ssr
 *.log
 package-lock.json
 *.tsbuildinfo
+*.ehpk

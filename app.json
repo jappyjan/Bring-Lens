@@ -1,0 +1,25 @@
+{
+  "package_id": "de.janjaap.bringlens",
+  "edition": "202601",
+  "name": "Bring Lens",
+  "version": "0.1.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.7",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Reads and updates your Bring! shopping list via the Bring proxy, and (optionally) sends microphone audio to a speech-to-text provider when you use 'Add by voice'.",
+      "whitelist": [
+        "https://bring-proxy.apps.janjaap.de",
+        "https://api.openai.com",
+        "wss://stt-rt.soniox.com",
+        "wss://api.deepgram.com"
+      ]
+    }
+  ],
+  "supported_languages": [
+    "en",
+    "de"
+  ]
+}

@@ -19,8 +19,10 @@ import { activeListName } from '../shared';
  *    …
  *    → Change list             ← bottom utility row
  *
- * Tapping a purchase item checks it off (TO_RECENTLY). Tapping the
- * voice row starts a recording. Tapping "Change list" navigates.
+ * Tapping a purchase item arms it for check-off (row gets a "?" prefix);
+ * a second tap on the same item commits (TO_RECENTLY). Any other action
+ * disarms. Tapping the voice row starts a recording. Tapping "Change
+ * list" navigates.
  */
 
 // Row kinds the full view can contain.
@@ -57,7 +59,11 @@ function formatRow(row: Row, snapshot: BringSnapshot): string {
     case 'item': {
       const item = snapshot.purchase[row.index];
       if (!item) return '';
-      return formatItemRow(item.name, item.specification);
+      const armed = snapshot.pendingCompleteName === item.name;
+      // Armed rows lose 2 chars of name budget to the "? " prefix so the
+      // line still fits the 44-char display width.
+      const text = formatItemRow(item.name, item.specification, armed ? 42 : 44);
+      return armed ? `? ${text}` : text;
     }
     case 'change-list':
       return '→ Change list';
@@ -119,6 +125,7 @@ export const itemsFullScreen: GlassScreen<BringSnapshot, BringActions> = {
     }
 
     if (action.type === 'HIGHLIGHT_MOVE') {
+      if (snapshot.pendingCompleteName) ctx.setPendingCompleteName(null);
       return {
         ...nav,
         highlightedIndex: moveHighlight(
@@ -134,28 +141,40 @@ export const itemsFullScreen: GlassScreen<BringSnapshot, BringActions> = {
       if (!row) return nav;
       switch (row.kind) {
         case 'voice':
+          if (snapshot.pendingCompleteName) ctx.setPendingCompleteName(null);
           ctx.startVoice();
           return nav;
         case 'item': {
           const item = snapshot.purchase[row.index];
-          if (item) void ctx.completeItem(item);
-          // Keep highlight on the same index, which now points at the
-          // next item because the one we completed just disappeared.
-          return {
-            ...nav,
-            highlightedIndex: Math.min(
-              nav.highlightedIndex,
-              Math.max(0, rows.length - 2),
-            ),
-          };
+          if (!item) return nav;
+          if (snapshot.pendingCompleteName === item.name) {
+            // Second tap on the same item — commit the check-off.
+            ctx.setPendingCompleteName(null);
+            void ctx.completeItem(item);
+            // Keep highlight on the same index, which now points at the
+            // next item because the one we completed just disappeared.
+            return {
+              ...nav,
+              highlightedIndex: Math.min(
+                nav.highlightedIndex,
+                Math.max(0, rows.length - 2),
+              ),
+            };
+          }
+          // First tap (or arming a different item) — arm and wait for the
+          // second tap. Do NOT call completeItem.
+          ctx.setPendingCompleteName(item.name);
+          return nav;
         }
         case 'change-list':
+          if (snapshot.pendingCompleteName) ctx.setPendingCompleteName(null);
           ctx.navigate('/glasses/lists');
           return nav;
       }
     }
 
     if (action.type === 'GO_BACK') {
+      if (snapshot.pendingCompleteName) ctx.setPendingCompleteName(null);
       ctx.navigate('/glasses/lists');
     }
 
