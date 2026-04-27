@@ -24,6 +24,13 @@ export interface BringSnapshot {
   };
   /** Whether an API mutation is currently in-flight (for "Saving…" hints). */
   busy: boolean;
+  /**
+   * Name of the purchase item currently armed for check-off. The first tap
+   * on an item sets this; the second tap on the same item commits via
+   * `completeItem`. Any other action (highlight move, voice, navigate,
+   * tapping a different item) clears it back to null.
+   */
+  pendingCompleteName: string | null;
 }
 
 /**
@@ -39,6 +46,7 @@ export interface BringActions {
   stopVoice(): void;
   commitVoice(): Promise<void>;
   cancelVoice(): void;
+  setPendingCompleteName(name: string | null): void;
 }
 
 /** Find the name of the currently-active list (for headers). */

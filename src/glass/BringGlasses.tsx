@@ -81,6 +81,24 @@ export function BringGlasses() {
   // hint would only appear after some other unrelated state change.
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
+  // Two-tap confirmation for checking off items on the glasses. First tap
+  // arms an item (its row gets a "?" prefix); second tap on the same item
+  // commits via `completeItem`. Any other action clears this back to null.
+  const [pendingCompleteName, setPendingCompleteName] = useState<string | null>(
+    null,
+  );
+
+  // Auto-cancel the arm if the item disappears from the purchase list
+  // (e.g. removed elsewhere, list switched, refresh dropped it). Without
+  // this the snapshot could keep painting "armed" state on a row that no
+  // longer exists in the rendered list.
+  useEffect(() => {
+    if (!pendingCompleteName) return;
+    if (!items.purchase.some((i) => i.name === pendingCompleteName)) {
+      setPendingCompleteName(null);
+    }
+  }, [items.purchase, pendingCompleteName]);
+
   // Mirror any engine-level STT error into `voiceError` so the user
   // actually sees why the voice session dropped. Without this, a failed
   // Soniox init / audio-source selection just flips `isListening` back
@@ -111,6 +129,7 @@ export function BringGlasses() {
         error: voiceError,
       },
       busy: itemsLoading,
+      pendingCompleteName,
     }),
     [
       lists,
@@ -122,6 +141,7 @@ export function BringGlasses() {
       stt.transcript,
       voiceError,
       itemsLoading,
+      pendingCompleteName,
     ],
   );
 
@@ -227,6 +247,7 @@ export function BringGlasses() {
     stopVoice,
     commitVoice,
     cancelVoice,
+    setPendingCompleteName,
   };
 
   // The router's action handler needs side-effect context; wrap it so
